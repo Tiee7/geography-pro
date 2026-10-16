@@ -8,6 +8,19 @@ A suite of single-file HTML interactive 3D geography and astronomy visualization
 
 See `知识体系.md` for the complete Chinese curriculum knowledge map (all 12 modules, grade levels, misconceptions, formulas, cognitive conflict triggers).
 
+## Chapter 01 responsive trial
+
+Chapter 01 is the mobile-first trial. Do not copy its UI or texture changes to other chapters until the user has tested and requested synchronization.
+
+- `01-earth-rotation.html`: semantic responsive shell, no build step.
+- `assets/chapter-01/lesson.css`: portrait stacked globe/panels, landscape and desktop split layout, touch targets and safe areas.
+- `assets/chapter-01/lesson-ui.js`: accessible panel tabs, shortcuts, presets and expanded globe mode, independent of CDN loading.
+- `assets/chapter-01/earth-scene.js`: Three.js scene and simulation bindings. ResizeObserver tracks the actual canvas container.
+- Chapter 01 uses local-normal map sampling with **90°E = local −Z**; cities, hour labels, time zones and arrows follow this convention. Other chapters retain their legacy convention described below.
+- The full 4K day map is local under `assets/earth/`. Atmosphere, clouds, sun rays and bloom start off for a clear map and lower rendering cost. All remain available as switches.
+- Use an HTTP server for chapter 01 because it now imports a local JavaScript module: `python3 -m http.server 8080` from the repository root.
+- Run `python3 tests/chapter01-responsive.py` for the responsive/interaction regression suite; see `tests/README.md`.
+
 ## Module Status
 
 | File | Status | Topic |

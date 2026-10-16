@@ -1,0 +1,1199 @@
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import {
+  CSS2DRenderer,
+  CSS2DObject,
+} from "three/addons/renderers/CSS2DRenderer.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+// ====================== CONSTANTS ======================
+const EARTH_RADIUS = 1.0;
+const DEG = Math.PI / 180;
+const RAD = 180 / Math.PI;
+
+// World cities: name, lat, lon, color
+const CITIES = [
+  {
+    id: "shanghai",
+    name: "上海",
+    lat: 31.2,
+    lon: 121.5,
+    color: "#7dc48a",
+    on: true,
+  },
+  {
+    id: "paris",
+    name: "巴黎",
+    lat: 48.9,
+    lon: 2.4,
+    color: "#6db3d9",
+    on: true,
+  },
+  {
+    id: "cairo",
+    name: "开罗",
+    lat: 30.0,
+    lon: 31.2,
+    color: "#f4a853",
+    on: true,
+  },
+  {
+    id: "newyork",
+    name: "纽约",
+    lat: 40.7,
+    lon: -74.0,
+    color: "#e85d4a",
+    on: false,
+  },
+  {
+    id: "la",
+    name: "洛杉矶",
+    lat: 34.0,
+    lon: -118.2,
+    color: "#c478d9",
+    on: false,
+  },
+  {
+    id: "london",
+    name: "伦敦",
+    lat: 51.5,
+    lon: -0.1,
+    color: "#d9d478",
+    on: false,
+  },
+  {
+    id: "moscow",
+    name: "莫斯科",
+    lat: 55.8,
+    lon: 37.6,
+    color: "#8a95a8",
+    on: false,
+  },
+  {
+    id: "sydney",
+    name: "悉尼",
+    lat: -33.9,
+    lon: 151.2,
+    color: "#d96db3",
+    on: false,
+  },
+];
+
+const KP_DOCS = {
+  "local-time": `<strong>地方时</strong>由经度决定：经度每相差 15°，地方时相差 1 小时；同一时刻东经地方时更早、西经更晚。为便于统一计时，全球划为 <strong>24 个时区</strong>，各时区采用本区中央经线的地方时作为区时（标准时）。0 时区以本初子午线附近（约 7.5°W–7.5°E）为核心，东 1 区到东 12 区，向西依次为西 1 区到西 12 区；相邻时区区时相差 1 小时。180° 附近设有国际日期变更线。`,
+  terminator: `<strong>晨昏圈</strong>是地球上昼夜两半球的分界线，一个大圆。它始终与太阳光线垂直。地球自转时，晨昏圈相对地面自东向西移动——<strong>晨线</strong>（由夜转昼）上的地点此刻正在迎来日出，<strong>昏线</strong>（由昼转夜）上正在日落。二分日时晨昏圈过两极、平分所有纬线；二至日时它偏离两极约 23.5°。`,
+  "rotation-direction": `地球自转方向为<strong>自西向东</strong>。从北极上空俯视呈逆时针，从南极上空俯视呈顺时针——这就是教学中常说的"北逆南顺"。自转产生<strong>地转偏向力</strong>（科氏力）：北半球运动物体向右偏，南半球向左偏，赤道上无偏向。这一机制塑造了大气环流、洋流方向和河道冲刷不对称。`,
+  tropics: `<strong>回归线</strong>是太阳直射点南北移动的极限纬线（±23.4°），对应夏至（北回归线）和冬至（南回归线）。回归线与赤道之间的区域一年中有两次太阳直射，回归线上一次，回归线之外无直射。<strong>极圈</strong>（±66.6°）是出现极昼极夜现象的最低纬度——从极圈到极点，极昼和极夜的持续时间从 1 天扩展到 6 个月。`,
+};
+
+// ====================== THREE SETUP ======================
+const canvas = document.getElementById("three-canvas");
+const wrap = canvas.parentElement;
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(
+  42,
+  wrap.clientWidth / wrap.clientHeight,
+  0.1,
+  100,
+);
+function fitDistance() {
+  const width = Math.max(wrap.clientWidth, 1),
+    height = Math.max(wrap.clientHeight, 1);
+  const diameter = Math.max(150, Math.min(width * 0.86, height - 160));
+  return Math.min(
+    8,
+    Math.max(2.6, height / (diameter * Math.tan((camera.fov * Math.PI) / 360))),
+  );
+}
+function resetCamera() {
+  camera.position.set(3.2, 1.4, 3.4).normalize().multiplyScalar(fitDistance());
+}
+resetCamera();
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(
+  Math.min(
+    window.devicePixelRatio,
+    matchMedia("(max-width: 899px)").matches ? 1.25 : 1.5,
+  ),
+);
+renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+renderer.setClearColor(0x050811, 1);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(wrap.clientWidth, wrap.clientHeight);
+labelRenderer.domElement.style.position = "absolute";
+labelRenderer.domElement.style.top = "0";
+labelRenderer.domElement.style.pointerEvents = "none";
+wrap.appendChild(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1.6;
+controls.maxDistance = 8;
+
+// ── Bloom post-processing ────────────────────────────────────────────────────
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(wrap.clientWidth, wrap.clientHeight),
+  0.35, // strength — subtle, scientific tool aesthetic
+  0.5, // radius
+  0.88, // threshold — only very bright objects bloom
+);
+bloomPass.enabled = false;
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+// Lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.18));
+const sunLight = new THREE.DirectionalLight(0xffe9c7, 1.3);
+sunLight.position.set(5, 0, 0);
+scene.add(sunLight);
+
+// ====================== STAR FIELD ======================
+function makeStars() {
+  const g = new THREE.BufferGeometry();
+  const n = 1800;
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const r = 40 + Math.random() * 20;
+    const th = Math.random() * Math.PI * 2;
+    const ph = Math.acos(2 * Math.random() - 1);
+    pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+    pos[i * 3 + 1] = r * Math.cos(ph);
+    pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    const b = 0.3 + Math.random() * 0.7;
+    col[i * 3] = b;
+    col[i * 3 + 1] = b;
+    col[i * 3 + 2] = b * (0.85 + Math.random() * 0.15);
+  }
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  const m = new THREE.PointsMaterial({
+    size: 0.06,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.8,
+  });
+  return new THREE.Points(g, m);
+}
+scene.add(makeStars());
+
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  BEGIN: SHARED EARTH RENDER BLOCK v2                                ║
+// ║  Copy this entire block verbatim into any module that renders Earth. ║
+// ║  Make changes here first, then propagate to other modules.           ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+
+// ====================== EARTH GROUP ======================
+// Earth is a group rotating around Y axis. The Sun stays fixed along +X.
+const earthGroup = new THREE.Group();
+scene.add(earthGroup);
+
+// Chapter 01 texture trial: complete 4096×2048 equirectangular world map.
+// Keep geography in Earth-local coordinates so the map follows the rotating globe.
+// East is local -Z (right-handed Y-up), matching city markers and standard sphere UVs.
+// Sources and future country-boundary layer: assets/earth/README.md.
+const TEX_EARTH_DAY = new URL(
+  "../earth/earth-blue-marble-4096.jpg",
+  import.meta.url,
+).href;
+const TEX_EARTH_SPEC =
+  "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/earth_specular_2048.jpg";
+const TEX_EARTH_NORM =
+  "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/earth_normal_2048.jpg";
+const TEX_EARTH_NIGHT =
+  "https://cdn.jsdelivr.net/gh/vasturiano/three-globe@2.31.1/example/img/earth-night.jpg";
+const TEX_EARTH_CLOUD =
+  "https://raw.githubusercontent.com/turban/webgl-earth/master/images/fair_clouds_4k.png";
+
+const texLoader = new THREE.TextureLoader();
+texLoader.crossOrigin = "anonymous";
+
+// Placeholder texture (dark blue) in case network is slow / blocked
+const placeholderCanvas = document.createElement("canvas");
+placeholderCanvas.width = 4;
+placeholderCanvas.height = 2;
+const pctx = placeholderCanvas.getContext("2d");
+pctx.fillStyle = "#0e1830";
+pctx.fillRect(0, 0, 4, 2);
+const placeholderTex = new THREE.CanvasTexture(placeholderCanvas);
+placeholderTex.colorSpace = THREE.SRGBColorSpace;
+
+const dayTex = texLoader.load(
+  TEX_EARTH_DAY,
+  (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    earthMat.uniforms.uDayMap.value = t;
+    earthMat.uniforms.uHasTex.value = 1.0;
+    earthMat.needsUpdate = true;
+    window.dispatchEvent(new Event("lesson:ready"));
+  },
+  undefined,
+  (err) => {
+    window.dispatchEvent(new Event("lesson:texture-error"));
+    console.warn("Earth texture failed to load, using placeholder", err);
+  },
+);
+dayTex.colorSpace = THREE.SRGBColorSpace;
+
+const specTex = texLoader.load(
+  TEX_EARTH_SPEC,
+  (t) => {
+    earthMat.uniforms.uSpecMap.value = t;
+    earthMat.uniforms.uHasSpec.value = 1.0;
+  },
+  undefined,
+  () => {},
+);
+
+texLoader.load(
+  TEX_EARTH_NORM,
+  (t) => {
+    earthMat.uniforms.uNormalMap.value = t;
+    earthMat.uniforms.uHasNorm.value = 1.0;
+    earthMat.needsUpdate = true;
+  },
+  undefined,
+  () => {},
+);
+
+texLoader.load(
+  TEX_EARTH_NIGHT,
+  (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    earthMat.uniforms.uNightMap.value = t;
+    earthMat.uniforms.uHasNight.value = 1.0;
+    earthMat.needsUpdate = true;
+  },
+  undefined,
+  () => {},
+);
+
+const earthVert = `
+  varying vec3 vNormal;
+  varying vec3 vMapNormal;
+  varying vec3 vWorldPos;
+  varying vec2 vUv;
+  void main() {
+    vNormal = normalize(mat3(modelMatrix) * normal);
+    vMapNormal = normal;
+    vec4 wp = modelMatrix * vec4(position, 1.0);
+    vWorldPos = wp.xyz;
+    vUv = uv;
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+const earthFrag = `
+  precision highp float;
+  varying vec3 vNormal;
+  varying vec3 vMapNormal;
+  varying vec3 vWorldPos;
+  varying vec2 vUv;
+  uniform vec3 uSunDir;
+  uniform sampler2D uDayMap;
+  uniform sampler2D uSpecMap;
+  uniform sampler2D uNightMap;
+  uniform sampler2D uNormalMap;
+  uniform float uHasTex;
+  uniform float uHasSpec;
+  uniform float uHasNight;
+  uniform float uHasNorm;
+  uniform float uAtmosphereStrength;
+
+  void main() {
+    // Sample in Earth-local space; world normals are only for sunlight and shading.
+    // Local +X = 0° longitude (u=0.5); local -Z = 90°E (u=0.75).
+    vec3 rawN = normalize(vNormal);
+    vec3 mapN = normalize(vMapNormal);
+    float lon = atan(-mapN.z, mapN.x);
+    float lat = asin(clamp(mapN.y, -1.0, 1.0));
+    // TextureLoader flips image rows: north must sample v=1, south v=0.
+    vec2 uv = vec2(lon / (2.0 * 3.14159265) + 0.5, 0.5 + lat / 3.14159265);
+
+    // Day texture
+    vec3 dayCol = uHasTex > 0.5 ? texture2D(uDayMap, uv).rgb : vec3(0.12, 0.18, 0.28);
+
+    // Normal map — TBN perturbation in world space
+    vec3 N = rawN;
+    if (uHasNorm > 0.5) {
+      vec3 mapN = texture2D(uNormalMap, uv).rgb * 2.0 - 1.0;
+      vec3 T = normalize(cross(vec3(0.0, 1.0, 0.0), N));
+      vec3 B = normalize(cross(N, T));
+      // Guard poles where T degenerates
+      float poleGuard = 1.0 - smoothstep(0.97, 0.999, abs(N.y));
+      N = normalize(mix(N, mat3(T, B, N) * mapN, poleGuard));
+    }
+
+    // Lighting from perturbed normal
+    float lighting = dot(N, normalize(uSunDir));
+    float dayF  = smoothstep(-0.12, 0.18, lighting);   // day/night blend (terminator)
+    float nightF = 1.0 - smoothstep(-0.25, 0.05, lighting); // night lights blend
+
+    // Night side: real city lights texture
+    vec3 nightLights = vec3(0.0);
+    if (uHasNight > 0.5) {
+      vec3 nl = texture2D(uNightMap, uv).rgb;
+      nightLights = nl * nl * 2.8; // gamma boost for warm glow
+    }
+    vec3 nightCol = dayCol * 0.04 + vec3(0.006, 0.010, 0.018) + nightLights * nightF;
+
+    // Day side lighting
+    vec3 litDay = dayCol * (0.32 + 0.78 * max(lighting, 0.0));
+
+    // Specular sun glint on ocean
+    float specMask = uHasSpec > 0.5 ? texture2D(uSpecMap, uv).r : 0.0;
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    vec3 halfDir = normalize(normalize(uSunDir) + viewDir);
+    float specVal = pow(max(dot(N, halfDir), 0.0), 80.0) * specMask * dayF;
+    litDay += vec3(1.0, 0.96, 0.82) * specVal * 0.2;
+
+    vec3 col = mix(nightCol, litDay, dayF);
+
+    // Atmospheric rim glow (blue halo, stronger on day limb)
+    float rim = 1.0 - max(dot(viewDir, rawN), 0.0);
+    col += vec3(0.25, 0.52, 0.88) * pow(rim, 3.2) * 0.6 * (0.3 + 0.7 * dayF) * uAtmosphereStrength;
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+const earthMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uSunDir: { value: new THREE.Vector3(1, 0, 0) },
+    uDayMap: { value: placeholderTex },
+    uSpecMap: { value: placeholderTex },
+    uNightMap: { value: placeholderTex },
+    uNormalMap: { value: placeholderTex },
+    uHasTex: { value: 0.0 },
+    uHasSpec: { value: 0.0 },
+    uHasNight: { value: 0.0 },
+    uHasNorm: { value: 0.0 },
+    uAtmosphereStrength: { value: 0.0 },
+  },
+  vertexShader: earthVert,
+  fragmentShader: earthFrag,
+});
+const earthMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(EARTH_RADIUS, 96, 64),
+  earthMat,
+);
+earthGroup.add(earthMesh);
+
+// Atmosphere halo
+const atmoMat = new THREE.ShaderMaterial({
+  uniforms: {},
+  vertexShader: `
+    varying vec3 vNormal; varying vec3 vWorldPos;
+    void main(){ vNormal=normalize(mat3(modelMatrix)*normal); vec4 wp=modelMatrix*vec4(position,1.); vWorldPos=wp.xyz; gl_Position=projectionMatrix*viewMatrix*wp;}
+  `,
+  fragmentShader: `
+    varying vec3 vNormal; varying vec3 vWorldPos;
+    void main(){
+      vec3 v=normalize(cameraPosition-vWorldPos);
+      // Back faces have inward view angles; abs keeps the center transparent.
+      float rim=1.0-clamp(abs(dot(v,normalize(vNormal))),0.0,1.0);
+      float a=pow(rim,3.0)*0.45;
+      gl_FragColor=vec4(vec3(0.3,0.55,0.85), a);
+    }
+  `,
+  transparent: true,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const atmo = new THREE.Mesh(
+  new THREE.SphereGeometry(EARTH_RADIUS * 1.035, 64, 48),
+  atmoMat,
+);
+atmo.visible = false;
+earthGroup.add(atmo);
+
+// ── Cloud layer ──────────────────────────────────────────────────────────────
+// Separate transparent sphere, slow independent rotation in animate loop.
+const cloudPlaceholder = (() => {
+  const c = document.createElement("canvas");
+  c.width = 2;
+  c.height = 2;
+  c.getContext("2d").fillStyle = "rgba(255,255,255,0)";
+  c.getContext("2d").fillRect(0, 0, 2, 2);
+  return new THREE.CanvasTexture(c);
+})();
+const cloudMat = new THREE.MeshLambertMaterial({
+  map: cloudPlaceholder,
+  alphaMap: cloudPlaceholder,
+  transparent: true,
+  opacity: 0.82,
+  depthWrite: false,
+  blending: THREE.NormalBlending,
+});
+const cloudMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(EARTH_RADIUS * 1.012, 96, 64),
+  cloudMat,
+);
+earthGroup.add(cloudMesh);
+texLoader.load(
+  TEX_EARTH_CLOUD,
+  (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    cloudMat.map = t;
+    cloudMat.alphaMap = t;
+    cloudMat.needsUpdate = true;
+  },
+  undefined,
+  () => {},
+);
+
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  END: SHARED EARTH RENDER BLOCK v2                                  ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+
+// ====================== GRATICULE (LAT/LON LINES) ======================
+function makeGraticule() {
+  const group = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.16,
+  });
+  const matEq = new THREE.LineBasicMaterial({
+    color: 0xe85d4a,
+    transparent: true,
+    opacity: 0.55,
+  });
+  const R = EARTH_RADIUS * 1.002;
+
+  // Parallels every 15°
+  for (let lat = -75; lat <= 75; lat += 15) {
+    const r = R * Math.cos(lat * DEG);
+    const y = R * Math.sin(lat * DEG);
+    const pts = [];
+    for (let i = 0; i <= 128; i++) {
+      const t = (i / 128) * Math.PI * 2;
+      pts.push(new THREE.Vector3(r * Math.cos(t), y, r * Math.sin(t)));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(geo, lat === 0 ? matEq : mat);
+    line.userData.isEquator = lat === 0;
+    group.add(line);
+  }
+  // Meridians every 15° (24 meridians = 24 time zones)
+  for (let lon = 0; lon < 360; lon += 15) {
+    const pts = [];
+    for (let i = 0; i <= 64; i++) {
+      const phi = (i / 64) * Math.PI - Math.PI / 2;
+      pts.push(
+        new THREE.Vector3(
+          R * Math.cos(phi) * Math.cos(lon * DEG),
+          R * Math.sin(phi),
+          -R * Math.cos(phi) * Math.sin(lon * DEG),
+        ),
+      );
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    group.add(new THREE.Line(geo, mat));
+  }
+  return group;
+}
+const graticule = makeGraticule();
+earthGroup.add(graticule);
+
+// ====================== TROPICS & POLAR CIRCLES ======================
+function makeLatCircle(lat, color, opacity = 0.7) {
+  const R = EARTH_RADIUS * 1.004;
+  const r = R * Math.cos(lat * DEG);
+  const y = R * Math.sin(lat * DEG);
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const t = (i / 128) * Math.PI * 2;
+    pts.push(new THREE.Vector3(r * Math.cos(t), y, r * Math.sin(t)));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.Line(
+    geo,
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
+  );
+}
+const tropicsGroup = new THREE.Group();
+const tropicN = makeLatCircle(23.4, 0xf4a853);
+const tropicS = makeLatCircle(-23.4, 0xf4a853);
+const polarN = makeLatCircle(66.6, 0x6db3d9, 0.5);
+const polarS = makeLatCircle(-66.6, 0x6db3d9, 0.5);
+tropicsGroup.add(tropicN, tropicS, polarN, polarS);
+earthGroup.add(tropicsGroup);
+
+// ====================== POLES AXIS ======================
+const axisLine = (() => {
+  const pts = [new THREE.Vector3(0, -1.35, 0), new THREE.Vector3(0, 1.35, 0)];
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.Line(
+    geo,
+    new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.3,
+    }),
+  );
+})();
+earthGroup.add(axisLine);
+
+function makeLabel(text, color = "#e8ecf3", size = "11px") {
+  const el = document.createElement("div");
+  el.textContent = text;
+  el.style.color = color;
+  el.style.fontFamily = "'JetBrains Mono', monospace";
+  el.style.fontSize = size;
+  el.style.letterSpacing = "0.08em";
+  el.style.textShadow = "0 0 8px rgba(0,0,0,0.9)";
+  el.style.pointerEvents = "none";
+  return new CSS2DObject(el);
+}
+
+const polesGroup = new THREE.Group();
+const labelN = makeLabel("N", "#ffffff", "13px");
+labelN.position.set(0, 1.28, 0);
+polesGroup.add(labelN);
+const labelS = makeLabel("S", "#ffffff", "13px");
+labelS.position.set(0, -1.28, 0);
+polesGroup.add(labelS);
+earthGroup.add(polesGroup);
+
+// ====================== HOUR LABELS (every 15° meridian) ======================
+// These show local time at each meridian. They rotate with the earth.
+const hourLabelsGroup = new THREE.Group();
+const hourLabels = [];
+for (let h = 0; h < 24; h++) {
+  const lon = h * 15; // meridian at this longitude
+  const lat = 0;
+  const R = EARTH_RADIUS * 1.05;
+  const x = R * Math.cos(lat * DEG) * Math.cos(lon * DEG);
+  const y = R * Math.sin(lat * DEG);
+  const z = -R * Math.cos(lat * DEG) * Math.sin(lon * DEG);
+  const label = makeLabel(`${h}时`, "#f4a853", "10px");
+  label.position.set(x, y, z);
+  hourLabelsGroup.add(label);
+  hourLabels.push({ label, hour: h });
+}
+earthGroup.add(hourLabelsGroup);
+
+// ====================== TERMINATOR (day/night boundary) ======================
+// A great circle perpendicular to sun direction. Sun is fixed at +X in world space.
+// So terminator circle lies in Y-Z plane.
+function makeTerminator() {
+  const pts = [];
+  for (let i = 0; i <= 256; i++) {
+    const t = (i / 256) * Math.PI * 2;
+    pts.push(
+      new THREE.Vector3(0, Math.sin(t), Math.cos(t)).multiplyScalar(
+        EARTH_RADIUS * 1.008,
+      ),
+    );
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.Line(
+    geo,
+    new THREE.LineBasicMaterial({
+      color: 0x6db3d9,
+      transparent: true,
+      opacity: 0.7,
+    }),
+  );
+}
+const terminator = makeTerminator();
+// Terminator lives in WORLD space (doesn't rotate with earth), because sun direction is fixed.
+// But it needs to tilt when sun-lat ≠ 0 (seasonal). We'll handle via a tilt group.
+const terminatorHolder = new THREE.Group();
+terminatorHolder.add(terminator);
+scene.add(terminatorHolder);
+
+// ====================== SUN RAYS ======================
+const sunRaysGroup = new THREE.Group();
+function makeSunRays() {
+  sunRaysGroup.clear();
+  // Arrows pointing from +X toward earth, distributed
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      const start = new THREE.Vector3(3.2, j * 0.9, i * 0.9);
+      const end = new THREE.Vector3(1.3, j * 0.9, i * 0.9);
+      const dir = new THREE.Vector3().subVectors(end, start).normalize();
+      const len = start.distanceTo(end);
+      const arrow = new THREE.ArrowHelper(
+        dir,
+        start,
+        len,
+        0xf4a853,
+        0.15,
+        0.08,
+      );
+      arrow.line.material.transparent = true;
+      arrow.line.material.opacity = 0.7;
+      sunRaysGroup.add(arrow);
+    }
+  }
+}
+makeSunRays();
+scene.add(sunRaysGroup);
+
+// ====================== SUN SPHERE ======================
+const sun = new THREE.Mesh(
+  new THREE.SphereGeometry(0.12, 32, 32),
+  new THREE.MeshBasicMaterial({ color: 0xffe9c7 }),
+);
+sun.position.set(4.5, 0, 0);
+// Glow
+const sunGlow = new THREE.Mesh(
+  new THREE.SphereGeometry(0.22, 32, 32),
+  new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {},
+    side: THREE.BackSide,
+    vertexShader: `varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+    fragmentShader: `varying vec3 vN; void main(){ float r=pow(1.0-abs(vN.z),2.5); gl_FragColor=vec4(1.0,0.85,0.55, r*0.6);}`,
+  }),
+);
+sun.add(sunGlow);
+scene.add(sun);
+
+// ====================== TIME ZONE SHADING ======================
+// 24 slightly tinted wedges alternating, visible only when "time zones" toggled
+const timezoneGroup = new THREE.Group();
+function makeTimezoneBands() {
+  timezoneGroup.clear();
+  const R = EARTH_RADIUS * 1.001;
+  for (let h = 0; h < 24; h++) {
+    const lonC = h * 15; // central meridian
+    // band from lonC-7.5 to lonC+7.5
+    const geo = new THREE.BufferGeometry();
+    const verts = [];
+    const idx = [];
+    const SEG_LAT = 18;
+    const SEG_LON = 4;
+    for (let i = 0; i <= SEG_LAT; i++) {
+      const lat = -90 + (180 * i) / SEG_LAT;
+      for (let j = 0; j <= SEG_LON; j++) {
+        const lon = lonC - 7.5 + (15 * j) / SEG_LON;
+        const phi = lat * DEG,
+          th = lon * DEG;
+        verts.push(
+          R * Math.cos(phi) * Math.cos(th),
+          R * Math.sin(phi),
+          -R * Math.cos(phi) * Math.sin(th),
+        );
+      }
+    }
+    for (let i = 0; i < SEG_LAT; i++) {
+      for (let j = 0; j < SEG_LON; j++) {
+        const a = i * (SEG_LON + 1) + j;
+        const b = a + 1,
+          c = a + SEG_LON + 1,
+          d = c + 1;
+        idx.push(a, b, d, a, d, c);
+      }
+    }
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const color = h % 2 === 0 ? 0x6db3d9 : 0xf4a853;
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.07,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    timezoneGroup.add(new THREE.Mesh(geo, mat));
+  }
+}
+makeTimezoneBands();
+timezoneGroup.visible = false;
+earthGroup.add(timezoneGroup);
+
+// ====================== ROTATION DIRECTION ARROWS ======================
+const rotArrowGroup = new THREE.Group();
+function makeRotArrows() {
+  rotArrowGroup.clear();
+  // curved arrows near the equator showing W -> E
+  const positions = [
+    { lat: 0, lonStart: 80 }, // one near east side
+    { lat: 20, lonStart: 200 },
+    { lat: -20, lonStart: 340 },
+  ];
+  positions.forEach((p) => {
+    const pts = [];
+    const R = EARTH_RADIUS * 1.08;
+    for (let i = 0; i <= 20; i++) {
+      const lon = (p.lonStart + i * 1.5) * DEG;
+      const lat = p.lat * DEG;
+      pts.push(
+        new THREE.Vector3(
+          R * Math.cos(lat) * Math.cos(lon),
+          R * Math.sin(lat),
+          -R * Math.cos(lat) * Math.sin(lon),
+        ),
+      );
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({
+        color: 0x7dc48a,
+        transparent: true,
+        opacity: 0.85,
+      }),
+    );
+    rotArrowGroup.add(line);
+    // Arrow head
+    const tip = pts[pts.length - 1].clone();
+    const prev = pts[pts.length - 3].clone();
+    const dir = new THREE.Vector3().subVectors(tip, prev).normalize();
+    const ah = new THREE.ArrowHelper(dir, prev, 0.12, 0x7dc48a, 0.06, 0.04);
+    rotArrowGroup.add(ah);
+  });
+}
+makeRotArrows();
+earthGroup.add(rotArrowGroup);
+
+// ====================== CITIES ======================
+const cityGroup = new THREE.Group();
+const cityObjects = {};
+
+function buildCities() {
+  cityGroup.clear();
+  CITIES.forEach((c) => {
+    const R = EARTH_RADIUS * 1.005;
+    const phi = c.lat * DEG,
+      th = c.lon * DEG;
+    const pos = new THREE.Vector3(
+      R * Math.cos(phi) * Math.cos(th),
+      R * Math.sin(phi),
+      -R * Math.cos(phi) * Math.sin(th),
+    );
+    // Dot
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.018, 16, 16),
+      new THREE.MeshBasicMaterial({ color: c.color }),
+    );
+    dot.position.copy(pos);
+    // Outline ring
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.025, 0.032, 32),
+      new THREE.MeshBasicMaterial({
+        color: c.color,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide,
+      }),
+    );
+    ring.position.copy(pos);
+    ring.lookAt(pos.clone().multiplyScalar(2));
+    // Label
+    const labelEl = document.createElement("div");
+    labelEl.textContent = c.name;
+    labelEl.style.cssText = `color:${c.color};font-family:'Noto Sans SC',sans-serif;font-size:11px;font-weight:500;letter-spacing:0.05em;text-shadow:0 0 6px rgba(0,0,0,0.9);transform:translate(8px,-8px);pointer-events:none;`;
+    const label = new CSS2DObject(labelEl);
+    label.position.copy(pos.clone().multiplyScalar(1.08));
+    const obj = new THREE.Group();
+    obj.add(dot);
+    obj.add(ring);
+    obj.add(label);
+    obj.visible = c.on;
+    cityGroup.add(obj);
+    cityObjects[c.id] = { group: obj, label, data: c, worldPos: pos.clone() };
+  });
+}
+buildCities();
+earthGroup.add(cityGroup);
+
+// ====================== STATE ======================
+const state = {
+  paused: false,
+  speed: 30, // multiplier
+  simTime: 0, // seconds of simulated Earth time (UTC seconds since midnight UTC)
+  doy: 80, // day of year
+  solarLon: 0, // solar subpoint longitude (degrees, -180..180), computed each frame
+  solarLat: 0, // solar subpoint latitude (degrees) — from declination
+};
+
+// ====================== CONTROLS ======================
+// Knowledge point
+const kpSelect = document.getElementById("kp-select");
+const kpBody = document.getElementById("kp-body");
+function updateKP() {
+  kpBody.innerHTML = KP_DOCS[kpSelect.value];
+}
+kpSelect.addEventListener("change", updateKP);
+updateKP();
+
+// Speed
+const speedInput = document.getElementById("speed");
+const speedValue = document.getElementById("speed-value");
+speedInput.addEventListener("input", () => {
+  state.speed = +speedInput.value;
+  speedValue.textContent = `${state.speed}×`;
+});
+
+// Pause
+const pauseBtn = document.getElementById("btn-pause");
+pauseBtn.addEventListener("click", () => {
+  state.paused = !state.paused;
+  document.getElementById("pause-label").textContent = state.paused
+    ? "继续"
+    : "暂停";
+  document
+    .getElementById("pause-icon")
+    .setAttribute("d", state.paused ? "m8 5 11 7-11 7Z" : "M9 5v14M15 5v14");
+  pauseBtn.setAttribute("aria-pressed", String(state.paused));
+});
+
+// Reset view
+document.getElementById("btn-reset-view").addEventListener("click", () => {
+  resetCamera();
+  document
+    .querySelectorAll("[data-view]")
+    .forEach((button) => button.setAttribute("aria-pressed", "false"));
+  controls.target.set(0, 0, 0);
+  controls.update();
+});
+
+// View buttons
+document.querySelectorAll("[data-view]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document
+      .querySelectorAll("[data-view]")
+      .forEach((button) =>
+        button.setAttribute("aria-pressed", String(button === btn)),
+      );
+    const v = btn.dataset.view;
+    if (v === "north") camera.position.set(0, fitDistance(), 0.001);
+    else if (v === "south") camera.position.set(0, -fitDistance(), 0.001);
+    else
+      camera.position
+        .set(3.8, 0.8, 3.5)
+        .normalize()
+        .multiplyScalar(fitDistance());
+    controls.target.set(0, 0, 0);
+    controls.update();
+  });
+});
+
+// Layer toggles
+document.getElementById("layer-sun").addEventListener("change", (e) => {
+  sunRaysGroup.visible = e.target.checked;
+});
+document.getElementById("layer-terminator").addEventListener("change", (e) => {
+  terminatorHolder.visible = e.target.checked;
+});
+document.getElementById("layer-graticule").addEventListener("change", (e) => {
+  graticule.visible = e.target.checked;
+});
+document.getElementById("layer-timezones").addEventListener("change", (e) => {
+  timezoneGroup.visible = e.target.checked;
+});
+document.getElementById("layer-hourlabels").addEventListener("change", (e) => {
+  hourLabelsGroup.visible = e.target.checked;
+});
+document.getElementById("layer-arrows").addEventListener("change", (e) => {
+  rotArrowGroup.visible = e.target.checked;
+});
+document.getElementById("layer-tropics").addEventListener("change", (e) => {
+  tropicsGroup.visible = e.target.checked;
+});
+document.getElementById("layer-poles").addEventListener("change", (e) => {
+  polesGroup.visible = e.target.checked;
+});
+document.getElementById("layer-clouds").addEventListener("change", (e) => {
+  cloudMesh.visible = e.target.checked;
+});
+document.getElementById("layer-atmosphere").addEventListener("change", (e) => {
+  atmo.visible = e.target.checked;
+  earthMat.uniforms.uAtmosphereStrength.value = e.target.checked ? 1.0 : 0.0;
+});
+document.getElementById("layer-bloom").addEventListener("change", (e) => {
+  bloomPass.enabled = e.target.checked;
+});
+
+// Match the rendered defaults to the visible switches, including optional effects.
+document
+  .querySelectorAll('[id^="layer-"]')
+  .forEach((input) => input.dispatchEvent(new Event("change")));
+controls.addEventListener("start", () => {
+  document
+    .querySelectorAll("[data-view]")
+    .forEach((button) => button.setAttribute("aria-pressed", "false"));
+});
+
+// City toggles
+const cityTogglesEl = document.getElementById("city-toggles");
+CITIES.forEach((c) => {
+  const l = document.createElement("label");
+  l.className = "check";
+  l.innerHTML = `<input type="checkbox" data-city="${c.id}" ${c.on ? "checked" : ""}>${c.name}`;
+  l.querySelector("input").addEventListener("change", (e) => {
+    const id = e.target.dataset.city;
+    cityObjects[id].group.visible = e.target.checked;
+    c.on = e.target.checked;
+    renderCityCards();
+  });
+  cityTogglesEl.appendChild(l);
+});
+
+// Day of year
+const doyInput = document.getElementById("doy");
+const dateLabel = document.getElementById("date-label");
+const declValue = document.getElementById("decl-value");
+doyInput.addEventListener("input", () => {
+  state.doy = +doyInput.value;
+  updateSeasonal();
+});
+
+// ====================== SEASONAL MATH ======================
+// Solar declination approximation (degrees): δ = 23.44 * sin(2π * (doy + 284) / 365.25)
+function computeDeclination(doy) {
+  return 23.44 * Math.sin((2 * Math.PI * (doy + 284)) / 365.25);
+}
+function dateFromDOY(doy) {
+  const d = new Date(2025, 0, 1);
+  d.setDate(d.getDate() + Math.round(doy));
+  const m = d.getMonth() + 1,
+    day = d.getDate();
+  // label with solar event if close
+  const special = [
+    { doy: 80, name: "春分" },
+    { doy: 172, name: "夏至" },
+    { doy: 266, name: "秋分" },
+    { doy: 355, name: "冬至" },
+  ];
+  let prefix = "";
+  for (const s of special) {
+    if (Math.abs(doy - s.doy) < 4) prefix = s.name + " · ";
+  }
+  return `${prefix}${m}/${day}`;
+}
+
+function updateSeasonal() {
+  const decl = computeDeclination(state.doy);
+  state.solarLat = decl;
+  dateLabel.textContent = dateFromDOY(state.doy);
+  declValue.textContent = `${decl >= 0 ? "+" : ""}${decl.toFixed(1)}°`;
+  document.getElementById("sun-lat").textContent =
+    `${decl >= 0 ? "+" : ""}${decl.toFixed(1)}°`;
+
+  // Tilt the terminator so it's perpendicular to the sun's new elevation
+  // Sun dir in world: (cos(decl), sin(decl), 0)
+  // Terminator normal = sun dir; terminator plane perpendicular.
+  // Our base terminator is a circle in Y-Z plane (normal +X).
+  // Rotate around Z axis by -decl so its normal goes from (1,0,0) to (cos(decl), sin(decl), 0).
+  terminatorHolder.rotation.z = decl * DEG;
+  // Sun position
+  const sunDist = 4.5;
+  sun.position.set(
+    sunDist * Math.cos(decl * DEG),
+    sunDist * Math.sin(decl * DEG),
+    0,
+  );
+  sunLight.position.copy(sun.position);
+
+  // Update sun rays tilt to match
+  sunRaysGroup.rotation.z = decl * DEG;
+}
+updateSeasonal();
+
+// ====================== RIGHT PANEL RENDERING ======================
+const cityCardsEl = document.getElementById("city-cards");
+function renderCityCards() {
+  cityCardsEl.innerHTML = "";
+  if (!CITIES.some((c) => c.on)) {
+    cityCardsEl.innerHTML =
+      '<p class="city-empty">还没有选择城市。前往“城市”添加参照地点。</p>';
+  }
+  CITIES.filter((c) => c.on).forEach((c) => {
+    const card = document.createElement("div");
+    card.className = "city-block";
+    card.dataset.cityId = c.id;
+    card.innerHTML = `
+      <div class="city-name">
+        <span><span class="dot" style="background:${c.color}"></span>${c.name}</span>
+        <span class="city-coord">${formatCoord(c.lat, c.lon)}</span>
+      </div>
+      <div class="city-time" id="ctime-${c.id}">—</div>
+      <div class="city-meta">
+        <span>昼 <span id="cday-${c.id}">—</span>h</span>
+        <span>UTC<span id="cutc-${c.id}">—</span></span>
+      </div>
+    `;
+    cityCardsEl.appendChild(card);
+  });
+}
+function formatCoord(lat, lon) {
+  const latStr = `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? "N" : "S"}`;
+  const lonStr = `${Math.abs(lon).toFixed(1)}°${lon >= 0 ? "E" : "W"}`;
+  return `${latStr} · ${lonStr}`;
+}
+renderCityCards();
+
+// ====================== SIM LOOP ======================
+const utcTimeEl = document.getElementById("utc-time");
+const sunLonEl = document.getElementById("sun-lon");
+const hudTimeEl = document.getElementById("hud-utc-time");
+
+function formatHMS(totalSec) {
+  totalSec = ((totalSec % 86400) + 86400) % 86400;
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.floor(totalSec % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+function formatHM(totalSec) {
+  totalSec = ((totalSec % 86400) + 86400) % 86400;
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// Compute day length (approximate) for a given latitude (deg) and solar declination (deg)
+function dayLengthHours(lat, decl) {
+  const phi = lat * DEG;
+  const d = decl * DEG;
+  const cosH = -Math.tan(phi) * Math.tan(d);
+  if (cosH <= -1) return 24; // polar day
+  if (cosH >= 1) return 0; // polar night
+  const H = Math.acos(cosH);
+  return (2 * H * RAD) / 15;
+}
+
+// Compute local time for a city given UTC seconds and city longitude
+function localTimeFromUTC(utcSeconds, lon) {
+  const localSec = utcSeconds + (lon / 15) * 3600;
+  return localSec;
+}
+
+// Set initial UTC time to something sensible
+state.simTime = 14 * 3600 + 54 * 60; // 14:54 UTC, matches screenshot
+
+const clock = new THREE.Clock();
+const labelWorldPosition = new THREE.Vector3();
+const compactLabels = matchMedia(
+  "(max-width: 899px) and (orientation: portrait)",
+);
+function onFrontOfEarth(object) {
+  labelWorldPosition.copy(object.position).applyMatrix4(earthGroup.matrixWorld);
+  return (
+    labelWorldPosition.dot(camera.position) > labelWorldPosition.lengthSq()
+  );
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  if (!state.paused) {
+    state.simTime += dt * state.speed * 60; // speed in "simulated minutes per real second"
+  }
+  // Earth rotation angle: at UTC noon, prime meridian faces sun (+X).
+  // Solar subpoint longitude = 180° - (UTC_seconds / 86400) * 360°, maps UTC=12h -> 0°, UTC=0h -> 180°
+  // But we want earth's prime meridian rotation around Y:
+  // PrimeMeridian_world_lon = (UTC_seconds / 86400) * 360° - 180° (so at UTC=12, it's at 0)
+  // We set earthGroup.rotation.y = that value (converted to radians, with correct sign)
+  // Three's Y axis rotation: positive = counter-clockwise when viewed from +Y (which is our "from N pole")
+  // Earth rotates W->E, which from N pole is counter-clockwise. So rotation.y should increase with time.
+  const rotDeg = (state.simTime / 86400) * 360 - 180;
+  earthGroup.rotation.y = rotDeg * DEG;
+
+  // Sun stays fixed on +X in world, subsolar longitude in earth coords:
+  // If earth rotation is rotDeg, then the +X direction in earth local coords is at longitude -rotDeg.
+  // So subsolar longitude (where sun is overhead) = -rotDeg (normalized to -180..180).
+  let subLon = -rotDeg;
+  while (subLon > 180) subLon -= 360;
+  while (subLon < -180) subLon += 360;
+  state.solarLon = subLon;
+
+  // Update shader uniform: sun direction in WORLD coords is (cos(decl), sin(decl), 0)
+  const declRad = state.solarLat * DEG;
+  earthMat.uniforms.uSunDir.value.set(Math.cos(declRad), Math.sin(declRad), 0);
+
+  // Update data panel
+  utcTimeEl.textContent = formatHMS(state.simTime);
+  hudTimeEl.textContent = utcTimeEl.textContent;
+  sunLonEl.textContent = `${subLon >= 0 ? "+" : ""}${subLon.toFixed(1)}°`;
+
+  // City cards
+  CITIES.filter((c) => c.on).forEach((c) => {
+    const localSec = localTimeFromUTC(state.simTime, c.lon);
+    const timeEl = document.getElementById(`ctime-${c.id}`);
+    const dayEl = document.getElementById(`cday-${c.id}`);
+    const utcEl = document.getElementById(`cutc-${c.id}`);
+    if (timeEl) timeEl.textContent = formatHM(localSec);
+    if (dayEl)
+      dayEl.textContent = dayLengthHours(c.lat, state.solarLat).toFixed(1);
+    if (utcEl)
+      utcEl.textContent = ` ${c.lon >= 0 ? "+" : ""}${Math.round(c.lon / 15)}`;
+  });
+
+  // Update hour labels: each label sits at a fixed longitude on earth, but we want
+  // the TEXT to read the current local time at that longitude.
+  // Since they're at longitude (h*15), local time = UTC + h hours.
+  hourLabels.forEach(({ label, hour }) => {
+    const localSec = localTimeFromUTC(state.simTime, hour * 15);
+    const h = Math.floor((((localSec % 86400) + 86400) % 86400) / 3600);
+    label.element.textContent = `${h}时`;
+    // color: highlight solar noon (closest to subsolar)
+    const diffToSun = Math.abs(((hour * 15 - subLon + 540) % 360) - 180);
+    if (diffToSun < 10) label.element.style.color = "#e85d4a";
+    else if (diffToSun > 170) label.element.style.color = "#6db3d9";
+    else label.element.style.color = "#f4a853";
+  });
+
+  // Clouds drift at their own slower rate independent of earth rotation
+  cloudMesh.rotation.y += dt * 0.00008;
+
+  controls.update();
+  earthGroup.updateMatrixWorld();
+  // Screen labels must not show through the far side of the globe.
+  Object.values(cityObjects).forEach(({ label }) => {
+    label.visible = onFrontOfEarth(label);
+  });
+  hourLabels.forEach(({ label, hour }) => {
+    label.visible =
+      (!compactLabels.matches || hour % 3 === 0) && onFrontOfEarth(label);
+  });
+  composer.render(); // replaces renderer.render — bloom compositor
+  labelRenderer.render(scene, camera); // CSS2DRenderer overlay unaffected by bloom
+}
+animate();
+
+// Observe the canvas container: tabs, expanded mode, dynamic browser bars and
+// orientation changes can resize it without firing a window resize event.
+let previousFit = fitDistance();
+function resizeScene() {
+  const w = wrap.clientWidth,
+    h = wrap.clientHeight;
+  if (!w || !h) return;
+  const nextFit = fitDistance();
+  camera.position
+    .sub(controls.target)
+    .multiplyScalar(nextFit / previousFit)
+    .add(controls.target);
+  previousFit = nextFit;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(
+    Math.min(
+      window.devicePixelRatio,
+      matchMedia("(max-width: 899px)").matches ? 1.25 : 1.5,
+    ),
+  );
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  bloomPass.resolution.set(w, h);
+  labelRenderer.setSize(w, h);
+}
+new ResizeObserver(resizeScene).observe(wrap);
+window.addEventListener("resize", resizeScene);
+document.querySelectorAll("[data-simulation]").forEach((control) => {
+  control.disabled = false;
+});
