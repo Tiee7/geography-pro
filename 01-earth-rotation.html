@@ -625,14 +625,11 @@ scene.add(makeStars());
 const earthGroup = new THREE.Group();
 scene.add(earthGroup);
 
-// Real Earth texture from NASA Blue Marble via three.js official CDN.
-// Sphere UV: three.js SphereGeometry default UV has seam at +X (longitude 180° E/W).
-// Equirectangular image: u=0 maps to longitude -180°, u=1 to +180°.
-// But three.js SphereGeometry starts u=0 at +Z (longitude 90° E) by default — so texture
-// appears rotated. We correct by rotating the earthMesh itself, or we offset UVs in the shader.
-// Simpler: we rotate earthMesh by -Math.PI/2 around Y so u=0 lines up with -180°.
-
-const TEX_EARTH_DAY   = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/earth_atmos_2048.jpg';
+// Chapter 01 texture trial: complete 4096×2048 equirectangular world map.
+// Keep geography in Earth-local coordinates so the map follows the rotating globe.
+// East is local -Z (right-handed Y-up), matching city markers and standard sphere UVs.
+// Sources and future country-boundary layer: assets/earth/README.md.
+const TEX_EARTH_DAY   = './assets/earth/earth-blue-marble-4096.jpg';
 const TEX_EARTH_SPEC  = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/earth_specular_2048.jpg';
 const TEX_EARTH_NORM  = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/earth_normal_2048.jpg';
 const TEX_EARTH_NIGHT = 'https://cdn.jsdelivr.net/gh/vasturiano/three-globe@2.31.1/example/img/earth-night.jpg';
@@ -680,10 +677,12 @@ texLoader.load(
 
 const earthVert = `
   varying vec3 vNormal;
+  varying vec3 vMapNormal;
   varying vec3 vWorldPos;
   varying vec2 vUv;
   void main() {
     vNormal = normalize(mat3(modelMatrix) * normal);
+    vMapNormal = normal;
     vec4 wp = modelMatrix * vec4(position, 1.0);
     vWorldPos = wp.xyz;
     vUv = uv;
@@ -693,6 +692,7 @@ const earthVert = `
 const earthFrag = `
   precision highp float;
   varying vec3 vNormal;
+  varying vec3 vMapNormal;
   varying vec3 vWorldPos;
   varying vec2 vUv;
   uniform vec3 uSunDir;
@@ -706,11 +706,12 @@ const earthFrag = `
   uniform float uHasNorm;
 
   void main() {
-    // Robust UV from surface normal — independent of SphereGeometry UV convention.
-    // Longitude 0° (world +X) → u=0.5; +90°E (world +Z) → u=0.75.
+    // Sample in Earth-local space; world normals are only for sunlight and shading.
+    // Local +X = 0° longitude (u=0.5); local -Z = 90°E (u=0.75).
     vec3 rawN = normalize(vNormal);
-    float lon = atan(rawN.z, rawN.x);
-    float lat = asin(clamp(rawN.y, -1.0, 1.0));
+    vec3 mapN = normalize(vMapNormal);
+    float lon = atan(-mapN.z, mapN.x);
+    float lat = asin(clamp(mapN.y, -1.0, 1.0));
     // TextureLoader flips image rows: north must sample v=1, south v=0.
     vec2 uv = vec2(lon / (2.0 * 3.14159265) + 0.5, 0.5 + lat / 3.14159265);
 
@@ -748,8 +749,8 @@ const earthFrag = `
     float specMask = uHasSpec > 0.5 ? texture2D(uSpecMap, uv).r : 0.0;
     vec3 viewDir = normalize(cameraPosition - vWorldPos);
     vec3 halfDir = normalize(normalize(uSunDir) + viewDir);
-    float specVal = pow(max(dot(N, halfDir), 0.0), 36.0) * specMask * dayF;
-    litDay += vec3(1.0, 0.96, 0.82) * specVal * 0.85;
+    float specVal = pow(max(dot(N, halfDir), 0.0), 80.0) * specMask * dayF;
+    litDay += vec3(1.0, 0.96, 0.82) * specVal * 0.2;
 
     vec3 col = mix(nightCol, litDay, dayF);
 
@@ -853,7 +854,7 @@ function makeGraticule() {
       pts.push(new THREE.Vector3(
         R * Math.cos(phi) * Math.cos(lon * DEG),
         R * Math.sin(phi),
-        R * Math.cos(phi) * Math.sin(lon * DEG)
+        -R * Math.cos(phi) * Math.sin(lon * DEG)
       ));
     }
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -920,7 +921,7 @@ for (let h = 0; h < 24; h++) {
   const R = EARTH_RADIUS * 1.05;
   const x = R * Math.cos(lat * DEG) * Math.cos(lon * DEG);
   const y = R * Math.sin(lat * DEG);
-  const z = R * Math.cos(lat * DEG) * Math.sin(lon * DEG);
+  const z = -R * Math.cos(lat * DEG) * Math.sin(lon * DEG);
   const label = makeLabel(`${h}时`, '#f4a853', '10px');
   label.position.set(x, y, z);
   hourLabelsGroup.add(label);
@@ -1006,7 +1007,7 @@ function makeTimezoneBands() {
       for (let j = 0; j <= SEG_LON; j++) {
         const lon = lonC - 7.5 + (15 * j / SEG_LON);
         const phi = lat * DEG, th = lon * DEG;
-        verts.push(R * Math.cos(phi) * Math.cos(th), R * Math.sin(phi), R * Math.cos(phi) * Math.sin(th));
+        verts.push(R * Math.cos(phi) * Math.cos(th), R * Math.sin(phi), -R * Math.cos(phi) * Math.sin(th));
       }
     }
     for (let i = 0; i < SEG_LAT; i++) {
@@ -1049,7 +1050,7 @@ function makeRotArrows() {
       pts.push(new THREE.Vector3(
         R * Math.cos(lat) * Math.cos(lon),
         R * Math.sin(lat),
-        R * Math.cos(lat) * Math.sin(lon)
+        -R * Math.cos(lat) * Math.sin(lon)
       ));
     }
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -1078,7 +1079,7 @@ function buildCities() {
     const pos = new THREE.Vector3(
       R * Math.cos(phi) * Math.cos(th),
       R * Math.sin(phi),
-      R * Math.cos(phi) * Math.sin(th)
+      -R * Math.cos(phi) * Math.sin(th)
     );
     // Dot
     const dot = new THREE.Mesh(
