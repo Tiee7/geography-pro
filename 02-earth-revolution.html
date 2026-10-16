@@ -561,7 +561,8 @@ const earthFrag = `
     vec3 rawN = normalize(vNormal);
     float lon = atan(rawN.z, rawN.x);
     float lat = asin(clamp(rawN.y, -1.0, 1.0));
-    vec2 uv = vec2(lon / (2.0 * 3.14159265) + 0.5, 0.5 - lat / 3.14159265);
+    // TextureLoader flips image rows: north must sample v=1, south v=0.
+    vec2 uv = vec2(lon / (2.0 * 3.14159265) + 0.5, 0.5 + lat / 3.14159265);
 
     vec3 dayCol = uHasTex > 0.5 ? texture2D(uDayMap, uv).rgb : vec3(0.12, 0.18, 0.28);
 

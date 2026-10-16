@@ -121,10 +121,11 @@ earthTiltGroup (world space)
 
 ## UV Convention
 
+With TextureLoader’s default `flipY: true`, north maps to v=1 and south to v=0.
 UV computed from surface normals, NOT from SphereGeometry's built-in UVs (avoids seam artifacts):
 ```glsl
 float lon = atan(rawN.z, rawN.x);  // +X→0, +Z→π/2
-vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
+vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 + lat / PI);
 // u=0.5 → lon 0° (prime meridian); u=0.75 → lon 90°E
 ```
 
