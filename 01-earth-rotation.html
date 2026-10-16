@@ -438,6 +438,7 @@
         <label class="check"><input type="checkbox" id="layer-tropics" checked>回归线</label>
         <label class="check"><input type="checkbox" id="layer-poles" checked>南北极点</label>
         <label class="check"><input type="checkbox" id="layer-clouds" checked>云层</label>
+        <label class="check" title="模拟大气散射的装饰效果，厚度不代表真实大气层"><input type="checkbox" id="layer-atmosphere">大气光晕</label>
         <label class="check"><input type="checkbox" id="layer-bloom" checked>辉光</label>
       </div>
     </div>
@@ -704,6 +705,7 @@ const earthFrag = `
   uniform float uHasSpec;
   uniform float uHasNight;
   uniform float uHasNorm;
+  uniform float uAtmosphereStrength;
 
   void main() {
     // Sample in Earth-local space; world normals are only for sunlight and shading.
@@ -756,7 +758,7 @@ const earthFrag = `
 
     // Atmospheric rim glow (blue halo, stronger on day limb)
     float rim = 1.0 - max(dot(viewDir, rawN), 0.0);
-    col += vec3(0.25, 0.52, 0.88) * pow(rim, 3.2) * 0.6 * (0.3 + 0.7 * dayF);
+    col += vec3(0.25, 0.52, 0.88) * pow(rim, 3.2) * 0.6 * (0.3 + 0.7 * dayF) * uAtmosphereStrength;
 
     gl_FragColor = vec4(col, 1.0);
   }
@@ -772,6 +774,7 @@ const earthMat = new THREE.ShaderMaterial({
     uHasSpec:  { value: 0.0 },
     uHasNight: { value: 0.0 },
     uHasNorm:  { value: 0.0 },
+    uAtmosphereStrength: { value: 0.0 },
   },
   vertexShader: earthVert,
   fragmentShader: earthFrag,
@@ -790,14 +793,16 @@ const atmoMat = new THREE.ShaderMaterial({
     varying vec3 vNormal; varying vec3 vWorldPos;
     void main(){
       vec3 v=normalize(cameraPosition-vWorldPos);
-      float rim=1.0-max(dot(v,normalize(vNormal)),0.0);
-      float a=pow(rim,2.5)*0.9;
+      // Back faces have inward view angles; abs keeps the center transparent.
+      float rim=1.0-clamp(abs(dot(v,normalize(vNormal))),0.0,1.0);
+      float a=pow(rim,3.0)*0.45;
       gl_FragColor=vec4(vec3(0.3,0.55,0.85), a);
     }
   `,
   transparent: true, side: THREE.BackSide, depthWrite: false,
 });
 const atmo = new THREE.Mesh(new THREE.SphereGeometry(EARTH_RADIUS * 1.035, 64, 48), atmoMat);
+atmo.visible = false;
 earthGroup.add(atmo);
 
 // ── Cloud layer ──────────────────────────────────────────────────────────────
@@ -1179,6 +1184,10 @@ document.getElementById('layer-arrows').addEventListener('change', e => { rotArr
 document.getElementById('layer-tropics').addEventListener('change', e => { tropicsGroup.visible = e.target.checked; });
 document.getElementById('layer-poles').addEventListener('change', e => { polesGroup.visible = e.target.checked; });
 document.getElementById('layer-clouds').addEventListener('change', e => { cloudMesh.visible = e.target.checked; });
+document.getElementById('layer-atmosphere').addEventListener('change', e => {
+  atmo.visible = e.target.checked;
+  earthMat.uniforms.uAtmosphereStrength.value = e.target.checked ? 1.0 : 0.0;
+});
 document.getElementById('layer-bloom').addEventListener('change', e => {
   bloomPass.strength = e.target.checked ? 0.35 : 0.0;
 });
